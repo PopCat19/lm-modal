@@ -6,11 +6,11 @@
 - [ ] Update nixos-config with Hyprland window rule
 
 ## Keyboard Shortcuts
-- [ ] Enter → Send message (commit)
-- [ ] Shift+Enter → Insert newline in input
-- [ ] Shift+C → Copy response to clipboard
-- [ ] Esc → Close window / Clear
-- [ ] Consider: Tab for multiturn toggle
+- [x] Ctrl+Enter → Send message
+- [x] Enter → Insert newline (multiline default)
+- [x] Shift+C → Copy response to clipboard
+- [x] Esc → Clear session
+- [x] Tab → Toggle multiturn mode
 
 ## Stylix Theming
 - [ ] Add Stylix NixOS module integration
@@ -19,7 +19,7 @@
 - [ ] Apply to egui UI (background, text, accent)
 
 ## History Tree View
-- [ ] Design: Tree structure similar to pi-coding-agent
+- [x] Design: Tree structure similar to pi-coding-agent
   - Each session stored as JSONL
   - Branches for alternative responses
   - Root = first prompt, children = follow-ups
@@ -29,31 +29,30 @@
 - [ ] Show timestamps and truncated previews
 
 ## Multiturn Toggle (Tab)
-- [ ] State: single-turn (default) vs multi-turn
-- [ ] Single-turn: Each request is independent
-- [ ] Multi-turn: Maintain conversation context
-- [ ] Visual indicator of current mode
-- [ ] Tab key to toggle
+- [x] State: single-turn (default) vs multi-turn
+- [x] Single-turn: Each request is independent
+- [x] Multi-turn: Maintain conversation context
+- [x] Visual indicator of current mode
+- [x] Tab key to toggle
 
 ## History Management
-- [ ] Default: Temporary session (no persistence)
-- [ ] Auto-stash to backup on certain actions
-  - Rotation: Keep last 10 backup sessions
-  - Location: `~/.local/share/lm-modal/backups/`
-- [ ] Backup triggers:
+- [x] Default: Temporary session (no persistence)
+- [x] Auto-stash to backup on certain actions
+  - [x] Rotation: Keep last 10 backup sessions
+  - [x] Location: `~/.local/share/lm-modal/backups/`
+- [x] Backup triggers:
   - Window close with content
-  - Explicit save/stash
   - Before clearing
-- [ ] Format: JSONL per session
-- [ ] Backup rotation: Delete oldest when >10
+- [x] Format: JSON per session
+- [x] Backup rotation: Delete oldest when >10
 
 ---
 
 ## Implementation Order
 
-1. **Keyboard shortcuts** (foundation for other features)
-2. **Multiturn toggle** (needs mode state)
-3. **History tree** (needs data structures)
-4. **History management** (backup/rotation)
-5. **Stylix theming** (visual polish)
-6. **Floating window** (nixos-config)
+1. ~~Keyboard shortcuts~~ ✓ (foundation for other features)
+2. ~~Multiturn toggle~~ ✓ (needs mode state)
+3. ~~History management~~ ✓ (backup/rotation)
+4. History tree UI (visual)
+5. Stylix theming (visual polish)
+6. Floating window (nixos-config)

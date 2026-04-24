@@ -31,6 +31,10 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "lm-modal",
         options,
-        Box::new(move |_cc| Box::new(App::new(config))),
+        Box::new(move |_cc| {
+            let mut app = App::new(config);
+            app.load_backups();
+            Box::new(app)
+        }),
     )
 }

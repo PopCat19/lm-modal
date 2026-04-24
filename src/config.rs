@@ -20,17 +20,12 @@ pub struct Config {
     pub model: Option<String>,
     /// Request timeout in seconds
     pub timeout: u64,
-    /// Thread/storage directory
-    pub threads_dir: PathBuf,
-    /// History file path
-    pub history_file: PathBuf,
+    /// Backup sessions directory
+    pub backups_dir: PathBuf,
 }
 
 impl Default for Config {
     fn default() -> Self {
-        let config_dir = dirs::config_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("lm-modal");
         let data_dir = dirs::data_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join("lm-modal");
@@ -39,8 +34,7 @@ impl Default for Config {
             endpoint: String::from("http://localhost:8088"),
             model: None,
             timeout: 120,
-            threads_dir: data_dir.join("threads"),
-            history_file: config_dir.join("history.json"),
+            backups_dir: data_dir.join("backups"),
         }
     }
 }
@@ -71,8 +65,7 @@ impl Config {
         }
 
         // Ensure directories exist
-        std::fs::create_dir_all(&config.threads_dir).ok();
-        std::fs::create_dir_all(config.history_file.parent().unwrap()).ok();
+        std::fs::create_dir_all(&config.backups_dir).ok();
 
         config
     }
@@ -142,4 +135,10 @@ fn print_help() {
     println!("  -m, --model <NAME>    Model name (default: endpoint default)");
     println!("  -t, --timeout <SEC>   Request timeout (default: 120)");
     println!("  -h, --help            Show this help message");
+    println!();
+    println!("Keyboard Shortcuts:");
+    println!("  Ctrl+Enter  Send message");
+    println!("  Shift+C     Copy response");
+    println!("  Tab         Toggle single/multi-turn mode");
+    println!("  Esc         Clear session");
 }

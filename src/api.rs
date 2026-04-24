@@ -3,22 +3,32 @@
 // Purpose: OpenAI-compatible HTTP client for LLM completions
 //
 // This module:
-// - Sends single requests (no streaming) to OpenAI-compatible endpoints
+// - Sends requests to OpenAI-compatible endpoints
 // - Handles request/response serialization
-// - Returns complete responses for UI display
+// - Supports both single-turn and multi-turn conversations
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-/// Send a completion request to an OpenAI-compatible endpoint.
-pub async fn complete(endpoint: &str, model: Option<&str>, prompt: &str, timeout: u64) -> Result<String, Error> {
+/// API message format
+#[derive(Debug, Clone, Serialize)]
+pub struct ApiMessage {
+    pub role: &'static str,
+    pub content: String,
+}
+
+/// Send a completion request with conversation history.
+pub async fn complete_with_history(
+    endpoint: &str,
+    model: Option<&str>,
+    messages: Vec<ApiMessage>,
+    timeout: u64,
+) -> Result<String, Error> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(timeout))
         .build()?;
 
     let mut body = serde_json::json!({
-        "messages": [
-            {"role": "user", "content": prompt}
-        ]
+        "messages": messages
     });
 
     if let Some(m) = model {
@@ -49,6 +59,20 @@ pub async fn complete(endpoint: &str, model: Option<&str>, prompt: &str, timeout
         .first()
         .map(|c| c.message.content.clone())
         .ok_or_else(|| Error::Parse("No choices in response".into()))
+}
+
+/// Send a single-turn completion request.
+pub async fn complete(
+    endpoint: &str,
+    model: Option<&str>,
+    prompt: &str,
+    timeout: u64,
+) -> Result<String, Error> {
+    let messages = vec![ApiMessage {
+        role: "user",
+        content: prompt.to_string(),
+    }];
+    complete_with_history(endpoint, model, messages, timeout).await
 }
 
 #[derive(Debug)]
