@@ -9,7 +9,8 @@ authors = ["popcat19"]
 [dependencies]
 egui = "0.27"
 egui-winit = "0.27"
-egui_glow = "0.27"
+egui_glow = "0.27"  
+eframe = "0.27"
 glow = "0.13"
 winit = "0.29"
 

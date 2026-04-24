@@ -7,7 +7,7 @@
 // - Handles request/response serialization
 // - Returns complete responses for UI display
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 /// Send a completion request to an OpenAI-compatible endpoint.
 pub async fn complete(endpoint: &str, model: Option<&str>, prompt: &str, timeout: u64) -> Result<String, Error> {

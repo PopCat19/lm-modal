@@ -9,6 +9,7 @@
 
 use crate::api;
 use crate::config::Config;
+use std::sync::{Arc, Mutex};
 
 /// Application state.
 #[derive(Debug, Clone)]
@@ -27,9 +28,8 @@ impl State {
 
 /// Application struct.
 pub struct App {
-    pub state: State,
+    pub state: Arc<Mutex<State>>,
     pub input: String,
-    pub history: Vec<String>,
     pub config: Config,
     clipboard: Option<arboard::Clipboard>,
 }
@@ -37,9 +37,8 @@ pub struct App {
 impl App {
     pub fn new(config: Config) -> Self {
         Self {
-            state: State::Idle,
+            state: Arc::new(Mutex::new(State::Idle)),
             input: String::new(),
-            history: Vec::new(),
             config,
             clipboard: arboard::Clipboard::new().ok(),
         }
@@ -47,49 +46,55 @@ impl App {
 
     /// Send the current input as a completion request.
     pub fn send(&mut self, ctx: egui::Context) {
-        if self.input.trim().is_empty() || self.state.is_loading() {
+        if self.input.trim().is_empty() {
             return;
+        }
+
+        {
+            let s = self.state.lock().unwrap();
+            if s.is_loading() {
+                return;
+            }
+        }
+
+        {
+            let mut s = self.state.lock().unwrap();
+            *s = State::Loading;
         }
 
         let prompt = self.input.trim().to_string();
         let endpoint = self.config.endpoint.clone();
         let model = self.config.model.clone();
         let timeout = self.config.timeout;
-
-        self.state = State::Loading;
+        let state = self.state.clone();
 
         // Spawn async request
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             let result = rt.block_on(api::complete(&endpoint, model.as_deref(), &prompt, timeout));
 
-            // Update state on main thread
+            let mut s = state.lock().unwrap();
+            *s = match result {
+                Ok(text) => State::Done(text),
+                Err(e) => State::Error(e.to_string()),
+            };
+
             ctx.request_repaint();
-            std::thread::spawn(move || {
-                // The repaint will pick up the new state when poll_state is called
-            });
         });
     }
 
-    /// Poll for async result (called each frame).
-    pub fn poll_state(&mut self) {
-        // State updates happen via ctx.request_repaint() pattern
-        // In a real implementation, use egui's Sense or channels
-    }
-
     /// Copy response to clipboard.
-    pub fn copy_response(&mut self) {
-        if let State::Done(text) = &self.state {
-            if let Some(clipboard) = &mut self.clipboard {
-                let _ = clipboard.set_text(text.clone());
-            }
+    pub fn copy_response(&mut self, text: &str) {
+        if let Some(clipboard) = &mut self.clipboard {
+            let _ = clipboard.set_text(text.to_string());
         }
     }
 
     /// Clear and reset to idle.
     pub fn clear(&mut self) {
         self.input.clear();
-        self.state = State::Idle;
+        let mut s = self.state.lock().unwrap();
+        *s = State::Idle;
     }
 }
 
@@ -103,16 +108,21 @@ impl eframe::App for App {
                 ui.add_space(8.0);
 
                 // Input field
-                let input_response = ui.add(
+                ui.add(
                     egui::TextEdit::multiline(&mut self.input)
                         .desired_width(f32::INFINITY)
                         .desired_rows(3)
                         .hint_text("Ask..."),
                 );
 
-                // Send button
+                // Buttons
                 ui.horizontal(|ui| {
-                    let can_send = !self.input.trim().is_empty() && !self.state.is_loading();
+                    let is_loading = {
+                        let s = self.state.lock().unwrap();
+                        s.is_loading()
+                    };
+                    let can_send = !self.input.trim().is_empty() && !is_loading;
+
                     if ui.add_enabled(can_send, egui::Button::new("Send")).clicked() {
                         self.send(ctx.clone());
                     }
@@ -124,8 +134,13 @@ impl eframe::App for App {
 
                 ui.add_space(12.0);
 
-                // Status / Response
-                match &self.state {
+                // Clone state for display
+                let state_clone = {
+                    let s = self.state.lock().unwrap();
+                    s.clone()
+                };
+
+                match state_clone {
                     State::Idle => {
                         ui.label("Ready");
                     }
@@ -136,17 +151,18 @@ impl eframe::App for App {
                         });
                     }
                     State::Done(text) => {
+                        let text_for_copy = text.clone();
                         ui.group(|ui| {
                             ui.label("Response:");
                             ui.add_space(4.0);
                             egui::ScrollArea::vertical()
                                 .max_height(300.0)
                                 .show(ui, |ui| {
-                                    ui.label(text);
+                                    ui.label(&text);
                                 });
                             ui.add_space(4.0);
                             if ui.button("Copy").clicked() {
-                                self.copy_response();
+                                self.copy_response(&text_for_copy);
                             }
                         });
                     }

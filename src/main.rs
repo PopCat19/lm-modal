@@ -31,11 +31,6 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "lm-modal",
         options,
-        Box::new(move |cc| {
-            // Set theme
-            cc.egui_ctx.set_visuals(egui::Visuals::dark());
-
-            Ok(Box::new(App::new(config)))
-        }),
+        Box::new(move |_cc| Box::new(App::new(config))),
     )
 }

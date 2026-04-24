@@ -46,7 +46,7 @@ impl Default for Config {
 }
 
 /// TOML config file structure.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct ConfigFile {
     pub endpoint: Option<String>,
     pub model: Option<String>,
@@ -120,13 +120,16 @@ fn load_config_file() -> ConfigFile {
         .map(|p| p.join("lm-modal/config.toml"))
         .unwrap_or_else(|| PathBuf::from("config.toml"));
 
-    if config_path.exists() {
-        let content = std::fs::read_to_string(&config_path).ok()?;
-        toml::from_str(&content).ok()
-    } else {
-        None
+    if !config_path.exists() {
+        return ConfigFile::default();
     }
-    .unwrap_or_default()
+
+    let content = match std::fs::read_to_string(&config_path) {
+        Ok(c) => c,
+        Err(_) => return ConfigFile::default(),
+    };
+
+    toml::from_str(&content).unwrap_or_default()
 }
 
 fn print_help() {
