@@ -31,6 +31,8 @@
           buildInputs = with pkgs; [
             wayland
             libxkbcommon
+            libGL
+            libEGL
           ];
 
           nativeBuildInputs = with pkgs; [
@@ -40,7 +42,7 @@
 
           postInstall = ''
             wrapProgram $out/bin/lm-modal \
-              --prefix LD_LIBRARY_PATH : ${pkgs.lib.makeLibraryPath [ pkgs.wayland pkgs.libxkbcommon ]}
+              --prefix LD_LIBRARY_PATH : ${pkgs.lib.makeLibraryPath [ pkgs.wayland pkgs.libxkbcommon pkgs.libGL pkgs.libEGL ]}
           '';
         };
 
