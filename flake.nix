@@ -8,6 +8,10 @@
   };
 
   outputs = { self, nixpkgs, flake-utils, rust-overlay, ... }:
+    {
+      # Home Manager module is system-agnostic
+      homeManagerModules.default = import ./modules/home-manager.nix { inherit self; };
+    } //
     flake-utils.lib.eachDefaultSystem (system:
       let
         overlays = [ (import rust-overlay) ];
@@ -42,8 +46,6 @@
 
           RUST_SRC_PATH = "${rustToolchain}/lib/rustlib/src/rust/library";
         };
-
-        homeManagerModules.default = import ./modules/home-manager.nix { inherit self; };
       }
     );
 }
