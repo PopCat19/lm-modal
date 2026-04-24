@@ -30,11 +30,18 @@
 
           buildInputs = with pkgs; [
             wayland
+            libxkbcommon
           ];
 
           nativeBuildInputs = with pkgs; [
             pkg-config
+            makeWrapper
           ];
+
+          postInstall = ''
+            wrapProgram $out/bin/lm-modal \
+              --prefix LD_LIBRARY_PATH : ${pkgs.lib.makeLibraryPath [ pkgs.wayland pkgs.libxkbcommon ]}
+          '';
         };
 
         devShells.default = pkgs.mkShell {
