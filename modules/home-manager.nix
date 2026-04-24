@@ -7,8 +7,6 @@
 # - Configures the API endpoint
 # - Sets up config file
 
-{ self }:
-
 { config, lib, pkgs, ... }:
 
 let
@@ -37,12 +35,15 @@ in
       default = 120;
       description = "Request timeout in seconds";
     };
+
+    package = mkOption {
+      type = types.package;
+      description = "lm-modal package to use";
+    };
   };
 
   config = lib.mkIf cfg.enable {
-    home.packages = [
-      self.packages.${pkgs.system}.default
-    ];
+    home.packages = [ cfg.package ];
 
     xdg.configFile."lm-modal/config.toml".text = lib.generators.toYAML {} {
       endpoint = cfg.endpoint;

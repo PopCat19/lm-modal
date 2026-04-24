@@ -10,7 +10,8 @@
   outputs = { self, nixpkgs, flake-utils, rust-overlay, ... }:
     {
       # Home Manager module is system-agnostic
-      homeManagerModules.default = import ./modules/home-manager.nix { inherit self; };
+      # Package must be passed via the 'package' option
+      homeManagerModules.default = import ./modules/home-manager.nix;
     } //
     flake-utils.lib.eachDefaultSystem (system:
       let
