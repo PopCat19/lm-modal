@@ -21,18 +21,14 @@ const MAX_BACKUPS: usize = 10;
 #[derive(Debug, Clone)]
 pub enum State {
     Idle,
-    Loading,
+    Loading { pending_user_msg: String },
     Done(String),
     Error(String),
 }
 
 impl State {
     pub fn is_loading(&self) -> bool {
-        matches!(self, State::Loading)
-    }
-    
-    pub fn is_done(&self) -> bool {
-        matches!(self, State::Done(_))
+        matches!(self, State::Loading { .. })
     }
 }
 
@@ -51,13 +47,6 @@ impl Mode {
             Mode::MultiTurn => Mode::SingleTurn,
         }
     }
-    
-    pub fn label(self) -> &'static str {
-        match self {
-            Mode::SingleTurn => "single",
-            Mode::MultiTurn => "multi",
-        }
-    }
 }
 
 /// A single message in the conversation
@@ -74,15 +63,9 @@ pub enum Role {
 }
 
 /// Conversation history for multiturn mode
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Conversation {
     pub messages: Vec<Message>,
-}
-
-impl Default for Conversation {
-    fn default() -> Self {
-        Self { messages: Vec::new() }
-    }
 }
 
 impl Conversation {
@@ -96,14 +79,18 @@ impl Conversation {
         }).collect()
     }
     
-    pub fn to_jsonl(&self) -> String {
-        self.messages.iter().map(|m| {
-            let role = match m.role {
-                Role::User => "user",
-                Role::Assistant => "assistant",
-            };
-            serde_json::json!({"role": role, "content": &m.content}).to_string()
-        }).collect::<Vec<_>>().join("\n")
+    pub fn push_user(&mut self, content: String) {
+        self.messages.push(Message {
+            role: Role::User,
+            content,
+        });
+    }
+    
+    pub fn push_assistant(&mut self, content: String) {
+        self.messages.push(Message {
+            role: Role::Assistant,
+            content,
+        });
     }
 }
 
@@ -160,20 +147,10 @@ impl App {
             }
         }
 
-        {
-            let mut s = self.state.lock().unwrap();
-            *s = State::Loading;
-        }
-
         let prompt = self.input.trim().to_string();
-        let endpoint = self.config.endpoint.clone();
-        let model = self.config.model.clone();
-        let timeout = self.config.timeout;
-        let state = self.state.clone();
-        let mode = self.mode;
         
-        // Build messages based on mode
-        let messages = match mode {
+        // Store user message and build API messages based on mode
+        let messages = match self.mode {
             Mode::SingleTurn => {
                 vec![api::ApiMessage {
                     role: "user",
@@ -181,14 +158,23 @@ impl App {
                 }]
             }
             Mode::MultiTurn => {
-                let mut msgs = self.conversation.as_api_messages();
-                msgs.push(api::ApiMessage {
-                    role: "user",
-                    content: prompt.clone(),
-                });
-                msgs
+                // Add user message to conversation
+                self.conversation.push_user(prompt.clone());
+                self.conversation.as_api_messages()
             }
         };
+
+        // Set loading state
+        {
+            let mut s = self.state.lock().unwrap();
+            *s = State::Loading { pending_user_msg: prompt };
+        }
+
+        let endpoint = self.config.endpoint.clone();
+        let model = self.config.model.clone();
+        let timeout = self.config.timeout;
+        let state = self.state.clone();
+        let mode = self.mode;
 
         // Spawn async request
         std::thread::spawn(move || {
@@ -278,31 +264,33 @@ impl App {
             return Ok(());
         }
         let json = std::fs::read_to_string(path)?;
-        self.backups = serde_json::from_str(&json)
-            .unwrap_or_default();
+        self.backups = serde_json::from_str(&json).unwrap_or_default();
         Ok(())
     }
 
-    /// Handle response received (called from UI thread)
-    pub fn on_response(&mut self, response: String) {
+    /// Handle response received - store in conversation if multiturn
+    pub fn handle_response(&mut self, response: String) {
         self.last_response = Some(response.clone());
         
         // Add to conversation if in multiturn mode
         if self.mode == Mode::MultiTurn {
-            self.conversation.messages.push(Message {
-                role: Role::User,
-                content: self.input.clone(),
-            });
-            self.conversation.messages.push(Message {
-                role: Role::Assistant,
-                content: response,
-            });
+            self.conversation.push_assistant(response);
         }
     }
 }
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Handle response from loading state
+        {
+            let s = self.state.lock().unwrap();
+            if let State::Done(response) = s.clone() {
+                drop(s);
+                // Store user message if not already stored (single-turn case)
+                self.handle_response(response);
+            }
+        }
+        
         // Keyboard shortcuts - handle before widgets
         ctx.input_mut(|i| {
             // Escape to clear/close
@@ -320,8 +308,7 @@ impl eframe::App for App {
                 self.copy_response();
             }
             
-            // Ctrl+Enter to send (Enter alone works for newline in multiline)
-            // Note: For single-line behavior, Enter sends directly
+            // Ctrl+Enter to send
             if i.key_pressed(egui::Key::Enter) && i.modifiers.ctrl && !self.input.trim().is_empty() {
                 self.send(ctx.clone());
             }
@@ -349,6 +336,25 @@ impl eframe::App for App {
                     }
                 });
                 ui.add_space(8.0);
+
+                // Show conversation history in multiturn mode
+                if self.mode == Mode::MultiTurn && !self.conversation.messages.is_empty() {
+                    egui::ScrollArea::vertical()
+                        .max_height(150.0)
+                        .show(ui, |ui| {
+                            for msg in &self.conversation.messages {
+                                let (color, prefix) = match msg.role {
+                                    Role::User => (egui::Color32::LIGHT_BLUE, "You: "),
+                                    Role::Assistant => (egui::Color32::LIGHT_GREEN, "AI: "),
+                                };
+                                ui.horizontal(|ui| {
+                                    ui.label(egui::RichText::new(prefix).color(color).strong());
+                                    ui.label(&msg.content);
+                                });
+                            }
+                        });
+                    ui.add_space(8.0);
+                }
 
                 // Input field
                 ui.add(
@@ -384,14 +390,8 @@ impl eframe::App for App {
                 };
 
                 match state_clone {
-                    State::Idle => {
-                        if self.mode == Mode::MultiTurn && !self.conversation.messages.is_empty() {
-                            ui.group(|ui| {
-                                ui.label(format!("{} messages in conversation", self.conversation.messages.len()));
-                            });
-                        }
-                    }
-                    State::Loading => {
+                    State::Idle => {}
+                    State::Loading { .. } => {
                         ui.horizontal(|ui| {
                             ui.spinner();
                             ui.label("Thinking...");
@@ -401,14 +401,14 @@ impl eframe::App for App {
                         ui.group(|ui| {
                             ui.horizontal(|ui| {
                                 ui.label("Response:");
-                                if ui.small_button("Copy").clicked() {
+                                if ui.small_button("Copy (Shift+C)").clicked() {
                                     self.last_response = Some(text.clone());
                                     self.copy_response();
                                 }
                             });
                             ui.add_space(4.0);
                             egui::ScrollArea::vertical()
-                                .max_height(300.0)
+                                .max_height(200.0)
                                 .show(ui, |ui| {
                                     ui.label(&text);
                                 });
@@ -429,11 +429,13 @@ impl eframe::App for App {
                                 ui.label("No backup sessions");
                             } else {
                                 for (i, (ts, conv)) in self.backups.iter().enumerate() {
+                                    let dt = chrono_timestamp(*ts);
                                     ui.horizontal(|ui| {
-                                        ui.label(format!("#{} {} msgs", i + 1, conv.messages.len()));
+                                        ui.label(format!("#{} {} - {} msgs", i + 1, dt, conv.messages.len()));
                                         if ui.small_button("restore").clicked() {
                                             self.conversation = conv.clone();
                                             self.show_history = false;
+                                            self.last_response = None;
                                             let mut s = self.state.lock().unwrap();
                                             *s = State::Idle;
                                         }
@@ -445,4 +447,11 @@ impl eframe::App for App {
             });
         });
     }
+}
+
+fn chrono_timestamp(ts: i64) -> String {
+    use std::time::{UNIX_EPOCH, SystemTime};
+    let duration = UNIX_EPOCH + std::time::Duration::from_secs(ts as u64);
+    let datetime: chrono::DateTime<chrono::Local> = duration.into();
+    datetime.format("%m/%d %H:%M").to_string()
 }
