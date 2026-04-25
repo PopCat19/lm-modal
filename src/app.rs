@@ -4,7 +4,7 @@
 //
 // This module:
 // - Defines the App state machine (Idle/Loading/Done/Error)
-// - Renders the egui UI
+// - Renders the egui UI using PMD design principles
 // - Handles user input and clipboard operations
 // - Manages conversation history and multiturn mode
 
@@ -45,6 +45,13 @@ impl Mode {
         match self {
             Mode::SingleTurn => Mode::MultiTurn,
             Mode::MultiTurn => Mode::SingleTurn,
+        }
+    }
+    
+    pub fn label(&self) -> &'static str {
+        match self {
+            Mode::SingleTurn => "single",
+            Mode::MultiTurn => "multi",
         }
     }
 }
@@ -256,56 +263,63 @@ impl eframe::App for App {
             }
         }
         
-        // Keyboard shortcuts - all handled at top level
+        // Keyboard shortcuts
         ctx.input_mut(|i| {
-            // Tab: toggle mode, prevent focus cycling
             if i.key_pressed(egui::Key::Tab) {
                 self.mode = self.mode.toggle();
                 i.events.retain(|e| !matches!(e, egui::Event::Key { key: egui::Key::Tab, .. }));
             }
-            // Escape: clear
             if i.key_pressed(egui::Key::Escape) {
                 self.clear();
             }
-            // Shift+C: copy
             if i.modifiers.shift && i.key_pressed(egui::Key::C) {
                 self.copy_response();
             }
-            // M: toggle mode (alternative)
             if i.key_pressed(egui::Key::M) && !i.modifiers.any() {
                 self.mode = self.mode.toggle();
             }
-            // Ctrl+Enter: send
             if i.key_pressed(egui::Key::Enter) && i.modifiers.ctrl && !self.input.trim().is_empty() {
                 self.send(ctx.clone());
             }
         });
 
-        // Central panel - fill entire window
+        // PMD color constants
+        use egui::{Color32, RichText, Vec2};
+        const BG_FLOOR: Color32 = Color32::from_rgb(41, 41, 41);
+        const SURFACE: Color32 = Color32::from_rgb(51, 51, 51);
+        const TEXT_SUB: Color32 = Color32::from_rgb(176, 176, 176);
+        const TEXT_BODY: Color32 = Color32::from_rgb(204, 204, 204);
+        const TEXT_PRIMARY: Color32 = Color32::from_rgb(232, 232, 232);
+        const ACCENT: Color32 = Color32::from_rgb(86, 156, 214);
+        
+        const SPACING_TIGHT: f32 = 4.0;
+        const SPACING_STANDARD: f32 = 8.0;
+        const SPACING_GENEROUS: f32 = 16.0;
+        const RADIUS: f32 = 16.0;
+
+        // Central panel
         egui::CentralPanel::default().show(ctx, |ui| {
             let available = ui.available_size();
             
-            ui.vertical(|ui| {
-                // Header
+            ui.with_layout(egui::Layout::top_down(egui::Align::LEFT), |ui| {
+                // === HEADER (88x) ===
                 ui.horizontal(|ui| {
-                    ui.heading("lm-modal");
-                    ui.add_space(8.0);
-                    let mode_text = match self.mode {
-                        Mode::SingleTurn => "single",
-                        Mode::MultiTurn => "multi",
-                    };
-                    ui.label(
-                        egui::RichText::new(mode_text)
-                            .small()
-                            .color(egui::Color32::from_rgb(128, 128, 128))
-                    );
-                    ui.add_space(8.0);
+                    ui.label(RichText::new("lm-modal").strong().color(TEXT_PRIMARY));
+                    ui.add_space(SPACING_GENEROUS);
+                    
+                    // Mode indicator (72x)
+                    ui.label(RichText::new(self.mode.label()).small().color(TEXT_SUB));
+                    ui.add_space(SPACING_STANDARD);
+                    
+                    // Action buttons (72x text)
                     if ui.small_button("history").clicked() {
                         self.show_history = !self.show_history;
                     }
                 });
+                
+                ui.add_space(SPACING_GENEROUS);
 
-                // Conversation history (multiturn)
+                // === CONVERSATION HISTORY (80x) ===
                 if self.mode == Mode::MultiTurn && !self.conversation.messages.is_empty() {
                     let hist_height = (available.y * 0.3).min(150.0);
                     egui::ScrollArea::vertical()
@@ -313,26 +327,27 @@ impl eframe::App for App {
                         .show(ui, |ui| {
                             for msg in &self.conversation.messages {
                                 let (color, prefix) = match msg.role {
-                                    Role::User => (egui::Color32::LIGHT_BLUE, "You: "),
-                                    Role::Assistant => (egui::Color32::LIGHT_GREEN, "AI: "),
+                                    Role::User => (ACCENT, "You: "),
+                                    Role::Assistant => (TEXT_BODY, "AI: "),
                                 };
                                 ui.horizontal(|ui| {
-                                    ui.label(egui::RichText::new(prefix).color(color).strong());
-                                    ui.label(&msg.content);
+                                    ui.label(RichText::new(prefix).color(color).strong());
+                                    ui.label(RichText::new(&msg.content).color(TEXT_BODY));
                                 });
                             }
                         });
+                    ui.add_space(SPACING_STANDARD);
                 }
 
-                // Input field
+                // === INPUT AREA (80x) ===
                 let input_height = (available.y * 0.15).max(60.0);
                 ui.add_sized([available.x, input_height],
                     egui::TextEdit::multiline(&mut self.input)
                         .desired_width(f32::INFINITY)
-                        .hint_text("Ask... (Ctrl+Enter=send, Tab/M=mode)")
+                        .hint_text(RichText::new("Ask... (Ctrl+Enter=send, Tab/M=mode)").color(TEXT_SUB))
                 );
 
-                // Buttons
+                // === BUTTONS (72x) ===
                 ui.horizontal(|ui| {
                     let is_loading = self.state.lock().unwrap().is_loading();
                     let can_send = !self.input.trim().is_empty() && !is_loading;
@@ -351,56 +366,63 @@ impl eframe::App for App {
                     }
                 });
 
-                // Response area - fill remaining space
+                ui.add_space(SPACING_GENEROUS);
+
+                // === RESPONSE AREA (80x) ===
                 if let Some(ref response) = self.last_response {
                     let response_clone = response.clone();
                     let response_text = response.clone();
-                    let remaining = ui.available_height() - 20.0;
+                    let remaining = ui.available_height() - SPACING_STANDARD;
                     
                     egui::ScrollArea::vertical()
                         .max_height(remaining)
                         .show(ui, |ui| {
-                            ui.group(|ui| {
-                                ui.horizontal(|ui| {
-                                    ui.label("Response:");
-                                    if ui.small_button("Copy").clicked() {
-                                        if let Some(clipboard) = &mut self.clipboard {
-                                            let _ = clipboard.set_text(response_clone);
+                            // Response container with surface background
+                            egui::Frame::group(ui.style())
+                                .fill(SURFACE)
+                                .rounding(RADIUS)
+                                .inner_margin(Vec2::splat(SPACING_STANDARD))
+                                .show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.label(RichText::new("Response:").strong().color(TEXT_PRIMARY));
+                                        if ui.small_button("Copy").clicked() {
+                                            if let Some(clipboard) = &mut self.clipboard {
+                                                let _ = clipboard.set_text(response_clone);
+                                            }
                                         }
-                                    }
+                                    });
+                                    ui.add_space(SPACING_TIGHT);
+                                    ui.label(RichText::new(&response_text).color(TEXT_BODY));
                                 });
-                                ui.add_space(4.0);
-                                ui.label(&response_text);
-                            });
                         });
                 }
 
-                // Loading indicator
+                // === LOADING INDICATOR ===
                 if self.state.lock().unwrap().is_loading() {
                     ui.horizontal(|ui| {
                         ui.spinner();
-                        ui.label("Thinking...");
+                        ui.label(RichText::new("Thinking...").color(TEXT_SUB));
                     });
                 }
 
-                // Error display
+                // === ERROR DISPLAY (72x) ===
                 if let State::Error(e) = self.state.lock().unwrap().clone() {
-                    ui.colored_label(egui::Color32::RED, format!("Error: {}", e));
+                    ui.label(RichText::new(format!("Error: {}", e)).color(Color32::from_rgb(214, 86, 86)));
                 }
 
-                // History viewer
+                // === HISTORY VIEWER ===
                 if self.show_history {
-                    ui.add_space(8.0);
+                    ui.add_space(SPACING_STANDARD);
                     egui::CollapsingHeader::new("Backups")
                         .default_open(true)
                         .show(ui, |ui| {
                             if self.backups.is_empty() {
-                                ui.label("No backup sessions");
+                                ui.label(RichText::new("No backup sessions").color(TEXT_SUB));
                             } else {
                                 for (i, (ts, conv)) in self.backups.iter().enumerate() {
                                     let dt = chrono_timestamp(*ts);
                                     ui.horizontal(|ui| {
-                                        ui.label(format!("#{} {} - {} msgs", i + 1, dt, conv.messages.len()));
+                                        ui.label(RichText::new(format!("#{} {} - {} msgs", i + 1, dt, conv.messages.len())).color(TEXT_BODY));
                                         if ui.small_button("restore").clicked() {
                                             self.conversation = conv.clone();
                                             self.show_history = false;
