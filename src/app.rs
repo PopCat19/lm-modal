@@ -99,23 +99,11 @@ pub struct App {
     pub state: Arc<Mutex<State>>,
     pub input: String,
     pub config: Config,
-    
-    /// Multiturn mode toggle
     pub mode: Mode,
-    
-    /// Conversation history for multiturn
     pub conversation: Conversation,
-    
-    /// Last response (for copy)
     pub last_response: Option<String>,
-    
-    /// History tree viewer visible
     pub show_history: bool,
-    
-    /// Backup sessions (last N temporary sessions)
     pub backups: VecDeque<(i64, Conversation)>,
-    
-    /// Clipboard handle
     clipboard: Option<arboard::Clipboard>,
 }
 
@@ -134,7 +122,6 @@ impl App {
         }
     }
 
-    /// Send the current input as a completion request.
     pub fn send(&mut self, ctx: egui::Context) {
         if self.input.trim().is_empty() {
             return;
@@ -149,7 +136,6 @@ impl App {
 
         let prompt = self.input.trim().to_string();
         
-        // Store user message and build API messages based on mode
         let messages = match self.mode {
             Mode::SingleTurn => {
                 vec![api::ApiMessage {
@@ -158,13 +144,11 @@ impl App {
                 }]
             }
             Mode::MultiTurn => {
-                // Add user message to conversation
                 self.conversation.push_user(prompt.clone());
                 self.conversation.as_api_messages()
             }
         };
 
-        // Set loading state
         {
             let mut s = self.state.lock().unwrap();
             *s = State::Loading;
@@ -175,7 +159,6 @@ impl App {
         let timeout = self.config.timeout;
         let state = self.state.clone();
 
-        // Spawn async request
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             let result = rt.block_on(api::complete_with_history(&endpoint, model.as_deref(), messages, timeout));
@@ -189,11 +172,9 @@ impl App {
             ctx.request_repaint();
         });
         
-        // Clear input after sending
         self.input.clear();
     }
 
-    /// Copy response to clipboard.
     pub fn copy_response(&mut self) {
         if let Some(ref text) = self.last_response {
             if let Some(clipboard) = &mut self.clipboard {
@@ -202,9 +183,7 @@ impl App {
         }
     }
 
-    /// Clear and reset to idle.
     pub fn clear(&mut self) {
-        // Stash current conversation if it has content
         if !self.conversation.messages.is_empty() {
             self.stash_backup();
         }
@@ -216,7 +195,6 @@ impl App {
         *s = State::Idle;
     }
     
-    /// Stash current conversation to backup
     fn stash_backup(&mut self) {
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -225,16 +203,13 @@ impl App {
         
         self.backups.push_front((timestamp, self.conversation.clone()));
         
-        // Rotate: remove oldest if over limit
         while self.backups.len() > MAX_BACKUPS {
             self.backups.pop_back();
         }
         
-        // Persist to disk
         self.save_backups();
     }
     
-    /// Save backups to disk
     fn save_backups(&self) {
         if let Err(e) = self._save_backups_impl() {
             eprintln!("Failed to save backups: {}", e);
@@ -250,7 +225,6 @@ impl App {
         Ok(())
     }
     
-    /// Load backups from disk
     pub fn load_backups(&mut self) {
         if let Err(e) = self._load_backups_impl() {
             eprintln!("Failed to load backups: {}", e);
@@ -270,37 +244,49 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Handle response from loading state (once)
+        // Handle response from loading state
         {
             let mut s = self.state.lock().unwrap();
             if let State::Done(response) = s.clone() {
-                // Store response and add to conversation
                 self.last_response = Some(response.clone());
                 if self.mode == Mode::MultiTurn {
                     self.conversation.push_assistant(response);
                 }
-                // Reset to Idle after handling
                 *s = State::Idle;
             }
         }
         
-        // Keyboard shortcuts - intercept Tab before widgets
-        let mut toggle_mode = false;
+        // Keyboard shortcuts - all handled at top level
         ctx.input_mut(|i| {
+            // Tab: toggle mode, prevent focus cycling
             if i.key_pressed(egui::Key::Tab) {
-                toggle_mode = true;
-                // Consume all Tab events to prevent focus cycling
+                self.mode = self.mode.toggle();
                 i.events.retain(|e| !matches!(e, egui::Event::Key { key: egui::Key::Tab, .. }));
             }
+            // Escape: clear
+            if i.key_pressed(egui::Key::Escape) {
+                self.clear();
+            }
+            // Shift+C: copy
+            if i.modifiers.shift && i.key_pressed(egui::Key::C) {
+                self.copy_response();
+            }
+            // M: toggle mode (alternative)
+            if i.key_pressed(egui::Key::M) && !i.modifiers.any() {
+                self.mode = self.mode.toggle();
+            }
+            // Ctrl+Enter: send
+            if i.key_pressed(egui::Key::Enter) && i.modifiers.ctrl && !self.input.trim().is_empty() {
+                self.send(ctx.clone());
+            }
         });
-        if toggle_mode {
-            self.mode = self.mode.toggle();
-        }
 
-        // Central panel
+        // Central panel - fill entire window
         egui::CentralPanel::default().show(ctx, |ui| {
+            let available = ui.available_size();
+            
             ui.vertical(|ui| {
-                // Header with mode indicator
+                // Header
                 ui.horizontal(|ui| {
                     ui.heading("lm-modal");
                     ui.add_space(8.0);
@@ -318,12 +304,12 @@ impl eframe::App for App {
                         self.show_history = !self.show_history;
                     }
                 });
-                ui.add_space(8.0);
 
-                // Show conversation history in multiturn mode
+                // Conversation history (multiturn)
                 if self.mode == Mode::MultiTurn && !self.conversation.messages.is_empty() {
+                    let hist_height = (available.y * 0.3).min(150.0);
                     egui::ScrollArea::vertical()
-                        .max_height(150.0)
+                        .max_height(hist_height)
                         .show(ui, |ui| {
                             for msg in &self.conversation.messages {
                                 let (color, prefix) = match msg.role {
@@ -336,34 +322,27 @@ impl eframe::App for App {
                                 });
                             }
                         });
-                    ui.add_space(8.0);
                 }
 
                 // Input field
-                ui.add(
+                let input_height = (available.y * 0.15).max(60.0);
+                ui.add_sized([available.x, input_height],
                     egui::TextEdit::multiline(&mut self.input)
                         .desired_width(f32::INFINITY)
-                        .desired_rows(3)
-                        .hint_text("Ask... (Ctrl+Enter=send, M=mode)")
+                        .hint_text("Ask... (Ctrl+Enter=send, Tab/M=mode)")
                 );
 
                 // Buttons
                 ui.horizontal(|ui| {
-                    let is_loading = {
-                        let s = self.state.lock().unwrap();
-                        s.is_loading()
-                    };
+                    let is_loading = self.state.lock().unwrap().is_loading();
                     let can_send = !self.input.trim().is_empty() && !is_loading;
 
                     if ui.add_enabled(can_send, egui::Button::new("Send")).clicked() {
                         self.send(ctx.clone());
                     }
-
                     if ui.button("Clear").clicked() {
                         self.clear();
                     }
-                    
-                    // Mode toggle button
                     if ui.small_button(match self.mode {
                         Mode::SingleTurn => "→ multi",
                         Mode::MultiTurn => "→ single",
@@ -372,53 +351,44 @@ impl eframe::App for App {
                     }
                 });
 
-                ui.add_space(12.0);
-
-                // Show last response if we have one
+                // Response area - fill remaining space
                 if let Some(ref response) = self.last_response {
                     let response_clone = response.clone();
-                    let response_for_label = response.clone();
-                    ui.group(|ui| {
-                        ui.horizontal(|ui| {
-                            ui.label("Response:");
-                            if ui.small_button("Copy (Shift+C)").clicked() {
-                                if let Some(clipboard) = &mut self.clipboard {
-                                    let _ = clipboard.set_text(response_clone);
-                                }
-                            }
-                        });
-                        ui.add_space(4.0);
-                        egui::ScrollArea::vertical()
-                            .max_height(200.0)
-                            .show(ui, |ui| {
-                                ui.label(&response_for_label);
+                    let response_text = response.clone();
+                    let remaining = ui.available_height() - 20.0;
+                    
+                    egui::ScrollArea::vertical()
+                        .max_height(remaining)
+                        .show(ui, |ui| {
+                            ui.group(|ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label("Response:");
+                                    if ui.small_button("Copy").clicked() {
+                                        if let Some(clipboard) = &mut self.clipboard {
+                                            let _ = clipboard.set_text(response_clone);
+                                        }
+                                    }
+                                });
+                                ui.add_space(4.0);
+                                ui.label(&response_text);
                             });
+                        });
+                }
+
+                // Loading indicator
+                if self.state.lock().unwrap().is_loading() {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label("Thinking...");
                     });
                 }
 
-                // State display - only show loading and error
-                let state_clone = {
-                    let s = self.state.lock().unwrap();
-                    s.clone()
-                };
-
-                match state_clone {
-                    State::Idle => {}
-                    State::Loading => {
-                        ui.horizontal(|ui| {
-                            ui.spinner();
-                            ui.label("Thinking...");
-                        });
-                    }
-                    State::Done(_) => {
-                        // Already handled above
-                    }
-                    State::Error(e) => {
-                        ui.colored_label(egui::Color32::RED, format!("Error: {}", e));
-                    }
+                // Error display
+                if let State::Error(e) = self.state.lock().unwrap().clone() {
+                    ui.colored_label(egui::Color32::RED, format!("Error: {}", e));
                 }
-                
-                // History viewer (if open)
+
+                // History viewer
                 if self.show_history {
                     ui.add_space(8.0);
                     egui::CollapsingHeader::new("Backups")
@@ -435,8 +405,7 @@ impl eframe::App for App {
                                             self.conversation = conv.clone();
                                             self.show_history = false;
                                             self.last_response = None;
-                                            let mut s = self.state.lock().unwrap();
-                                            *s = State::Idle;
+                                            *self.state.lock().unwrap() = State::Idle;
                                         }
                                     });
                                 }
@@ -444,29 +413,6 @@ impl eframe::App for App {
                         });
                 }
             });
-        });
-        
-        // Additional keyboard shortcuts (after UI is rendered)
-        ctx.input_mut(|i| {
-            // Escape: clear
-            if i.key_pressed(egui::Key::Escape) {
-                self.clear();
-            }
-            
-            // Shift+C: copy response  
-            if i.modifiers.shift && i.key_pressed(egui::Key::C) {
-                self.copy_response();
-            }
-            
-            // M key: toggle mode (alternative to Tab)
-            if i.key_pressed(egui::Key::M) && !i.modifiers.any() {
-                self.mode = self.mode.toggle();
-            }
-            
-            // Ctrl+Enter: send
-            if i.key_pressed(egui::Key::Enter) && i.modifiers.ctrl && !self.input.trim().is_empty() {
-                self.send(ctx.clone());
-            }
         });
     }
 }
