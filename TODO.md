@@ -23,8 +23,8 @@
   - Each session stored as JSONL
   - Branches for alternative responses
   - Root = first prompt, children = follow-ups
-- [ ] Add history button to UI
-- [ ] Create tree viewer screen/modal
+- [x] Add history button to UI
+- [ ] Create tree viewer screen/modal (improve visual)
 - [ ] Allow selecting/continuing from history nodes
 - [ ] Show timestamps and truncated previews
 

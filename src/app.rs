@@ -267,40 +267,36 @@ impl App {
         self.backups = serde_json::from_str(&json).unwrap_or_default();
         Ok(())
     }
-
-    /// Handle response received - store in conversation if multiturn
-    pub fn handle_response(&mut self, response: String) {
-        self.last_response = Some(response.clone());
-        
-        // Add to conversation if in multiturn mode
-        if self.mode == Mode::MultiTurn {
-            self.conversation.push_assistant(response);
-        }
-    }
 }
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Handle response from loading state
+        // Handle response from loading state (once)
         {
-            let s = self.state.lock().unwrap();
+            let mut s = self.state.lock().unwrap();
             if let State::Done(response) = s.clone() {
-                drop(s);
-                // Store user message if not already stored (single-turn case)
-                self.handle_response(response);
+                // Store response and add to conversation
+                self.last_response = Some(response.clone());
+                if self.mode == Mode::MultiTurn {
+                    self.conversation.push_assistant(response);
+                }
+                // Reset to Idle after handling
+                *s = State::Idle;
             }
         }
         
         // Keyboard shortcuts - handle before widgets
+        let mut should_toggle_mode = false;
         ctx.input_mut(|i| {
             // Escape to clear/close
             if i.key_pressed(egui::Key::Escape) {
                 self.clear();
             }
             
-            // Tab to toggle mode
+            // Tab to toggle mode (consume event to prevent focus cycling)
             if i.key_pressed(egui::Key::Tab) {
-                self.mode = self.mode.toggle();
+                should_toggle_mode = true;
+                i.consume_key(egui::Modifiers::NONE, egui::Key::Tab);
             }
             
             // Shift+C to copy response
@@ -313,6 +309,10 @@ impl eframe::App for App {
                 self.send(ctx.clone());
             }
         });
+        
+        if should_toggle_mode {
+            self.mode = self.mode.toggle();
+        }
 
         // Central panel
         egui::CentralPanel::default().show(ctx, |ui| {
