@@ -21,14 +21,14 @@ const MAX_BACKUPS: usize = 10;
 #[derive(Debug, Clone)]
 pub enum State {
     Idle,
-    Loading { pending_user_msg: String },
+    Loading,
     Done(String),
     Error(String),
 }
 
 impl State {
     pub fn is_loading(&self) -> bool {
-        matches!(self, State::Loading { .. })
+        matches!(self, State::Loading)
     }
 }
 
@@ -167,14 +167,13 @@ impl App {
         // Set loading state
         {
             let mut s = self.state.lock().unwrap();
-            *s = State::Loading { pending_user_msg: prompt };
+            *s = State::Loading;
         }
 
         let endpoint = self.config.endpoint.clone();
         let model = self.config.model.clone();
         let timeout = self.config.timeout;
         let state = self.state.clone();
-        let mode = self.mode;
 
         // Spawn async request
         std::thread::spawn(move || {
@@ -285,32 +284,16 @@ impl eframe::App for App {
             }
         }
         
-        // Keyboard shortcuts - handle before widgets
-        let mut should_toggle_mode = false;
+        // Keyboard shortcuts - intercept Tab before widgets
+        let mut toggle_mode = false;
         ctx.input_mut(|i| {
-            // Escape to clear/close
-            if i.key_pressed(egui::Key::Escape) {
-                self.clear();
-            }
-            
-            // Tab to toggle mode (consume event to prevent focus cycling)
             if i.key_pressed(egui::Key::Tab) {
-                should_toggle_mode = true;
-                i.consume_key(egui::Modifiers::NONE, egui::Key::Tab);
-            }
-            
-            // Shift+C to copy response
-            if i.modifiers.shift && i.key_pressed(egui::Key::C) {
-                self.copy_response();
-            }
-            
-            // Ctrl+Enter to send
-            if i.key_pressed(egui::Key::Enter) && i.modifiers.ctrl && !self.input.trim().is_empty() {
-                self.send(ctx.clone());
+                toggle_mode = true;
+                // Consume all Tab events to prevent focus cycling
+                i.events.retain(|e| !matches!(e, egui::Event::Key { key: egui::Key::Tab, .. }));
             }
         });
-        
-        if should_toggle_mode {
+        if toggle_mode {
             self.mode = self.mode.toggle();
         }
 
@@ -361,7 +344,7 @@ impl eframe::App for App {
                     egui::TextEdit::multiline(&mut self.input)
                         .desired_width(f32::INFINITY)
                         .desired_rows(3)
-                        .hint_text("Ask... (Ctrl+Enter=send, Tab=mode)")
+                        .hint_text("Ask... (Ctrl+Enter=send, M=mode)")
                 );
 
                 // Buttons
@@ -379,11 +362,41 @@ impl eframe::App for App {
                     if ui.button("Clear").clicked() {
                         self.clear();
                     }
+                    
+                    // Mode toggle button
+                    if ui.small_button(match self.mode {
+                        Mode::SingleTurn => "→ multi",
+                        Mode::MultiTurn => "→ single",
+                    }).clicked() {
+                        self.mode = self.mode.toggle();
+                    }
                 });
 
                 ui.add_space(12.0);
 
-                // State display
+                // Show last response if we have one
+                if let Some(ref response) = self.last_response {
+                    let response_clone = response.clone();
+                    let response_for_label = response.clone();
+                    ui.group(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.label("Response:");
+                            if ui.small_button("Copy (Shift+C)").clicked() {
+                                if let Some(clipboard) = &mut self.clipboard {
+                                    let _ = clipboard.set_text(response_clone);
+                                }
+                            }
+                        });
+                        ui.add_space(4.0);
+                        egui::ScrollArea::vertical()
+                            .max_height(200.0)
+                            .show(ui, |ui| {
+                                ui.label(&response_for_label);
+                            });
+                    });
+                }
+
+                // State display - only show loading and error
                 let state_clone = {
                     let s = self.state.lock().unwrap();
                     s.clone()
@@ -391,28 +404,14 @@ impl eframe::App for App {
 
                 match state_clone {
                     State::Idle => {}
-                    State::Loading { .. } => {
+                    State::Loading => {
                         ui.horizontal(|ui| {
                             ui.spinner();
                             ui.label("Thinking...");
                         });
                     }
-                    State::Done(text) => {
-                        ui.group(|ui| {
-                            ui.horizontal(|ui| {
-                                ui.label("Response:");
-                                if ui.small_button("Copy (Shift+C)").clicked() {
-                                    self.last_response = Some(text.clone());
-                                    self.copy_response();
-                                }
-                            });
-                            ui.add_space(4.0);
-                            egui::ScrollArea::vertical()
-                                .max_height(200.0)
-                                .show(ui, |ui| {
-                                    ui.label(&text);
-                                });
-                        });
+                    State::Done(_) => {
+                        // Already handled above
                     }
                     State::Error(e) => {
                         ui.colored_label(egui::Color32::RED, format!("Error: {}", e));
@@ -445,6 +444,29 @@ impl eframe::App for App {
                         });
                 }
             });
+        });
+        
+        // Additional keyboard shortcuts (after UI is rendered)
+        ctx.input_mut(|i| {
+            // Escape: clear
+            if i.key_pressed(egui::Key::Escape) {
+                self.clear();
+            }
+            
+            // Shift+C: copy response  
+            if i.modifiers.shift && i.key_pressed(egui::Key::C) {
+                self.copy_response();
+            }
+            
+            // M key: toggle mode (alternative to Tab)
+            if i.key_pressed(egui::Key::M) && !i.modifiers.any() {
+                self.mode = self.mode.toggle();
+            }
+            
+            // Ctrl+Enter: send
+            if i.key_pressed(egui::Key::Enter) && i.modifiers.ctrl && !self.input.trim().is_empty() {
+                self.send(ctx.clone());
+            }
         });
     }
 }
